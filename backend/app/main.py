@@ -29,14 +29,7 @@ app = FastAPI(
 # Configure CORS for React frontend (Local + Production Vercel)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",  # Vite dev server
-        "http://localhost:3000",  # Alternative port
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-        "https://deep-guard-ten.vercel.app", # Vercel production
-        "*"                       # Allow any for open hobby projects
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
