@@ -11,11 +11,11 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the backend code
-COPY . .
+COPY backend/ ./backend/
 
 # Expose port (Railway dynamically injects $PORT)
 EXPOSE $PORT
