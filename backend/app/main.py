@@ -39,11 +39,15 @@ app.add_middleware(
 app.include_router(router)
 
 
+from .services.hf_detector import preload_models
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
     logger.info("=" * 60)
     logger.info("DeepFake AI Audio Detector - Starting up")
+    logger.info("Initializing Heavy AI Models on Boot...")
+    preload_models()
     logger.info("=" * 60)
     
     # Ensure upload directory exists

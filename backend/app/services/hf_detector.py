@@ -27,8 +27,8 @@ _models_loaded = False
 _model_error = None
 
 
-def _load_models():
-    """Load both HuggingFace models (cached after first download)."""
+def preload_models():
+    """Load both HuggingFace models (called on server startup)."""
     global _processor_1, _model_1, _pipe_2, _models_loaded, _model_error
     if _models_loaded:
         return
@@ -78,8 +78,8 @@ def run_hf_detection(audio_path: str) -> DualHFResult:
     """
     global _model_error
 
-    # Load model on first call
-    _load_models()
+    # Load model if not already preloaded (fallback)
+    preload_models()
 
     if not _models_loaded:
         err_res = HFResult(score=0.5, confidence=0.0, label="unavailable", available=False, error=_model_error or "Models not loaded")
