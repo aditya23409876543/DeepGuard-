@@ -145,3 +145,40 @@ Upload an audio file for deepfake analysis.
 
 ### `GET /api/health`
 Health check. Returns `{"status": "healthy"}`
+
+## 🚀 Production Deployment (Vercel + Railway)
+
+Because DeepGuard requires specialized system-level audio libraries (FFmpeg, Librosa C-bindings) and heavy Neural Network memory, it cannot easily run on standard Serverless platforms.
+
+The best free/low-cost architectural split is:
+*   **Vercel**: Frontend (React + Vite) — Lightning fast, global CDN, perfect for static SPAs.
+*   **Railway**: Backend (FastAPI + Docker) — Runs standard containers, allows system-level `apt-get` packages for audio processing, and keeps the neural networks loaded in memory.
+
+### Step 1: Deploy Backend to Railway
+
+Railway will automatically detect the custom `Dockerfile` in the `/backend` folder.
+
+1.  Log into [Railway.app](https://railway.app/) and create a **New Project**.
+2.  Select **Deploy from GitHub repo** and connect this repository.
+3.  Once the prompt appears, **do not select the root directory**.
+    *   Go to **Settings > General > Root Directory** and type `/backend`.
+4.  Railway will automatically detect the `Dockerfile`, install the Linux audio drivers (`libsndfile1`, `ffmpeg`), and start the FastAPI server.
+5.  Go to the **Settings > Networking** tab and click **Generate Domain**.
+    *   *Save this URL (e.g., `https://ai-audio-backend.up.railway.app`). You need it for the frontend.*
+
+### Step 2: Deploy Frontend to Vercel
+
+Vercel will build and cache the React frontend perfectly for global distribution.
+
+1.  Open `/frontend/src/App.jsx` in your code (or on GitHub) and find the `axios.post('http://localhost:8000/api/analyze', ...)` line.
+2.  Change `http://localhost:8000` to the **Railway Domain** you generated in Step 1.
+    *(e.g., `axios.post('https://ai-audio-backend.up.railway.app/api/analyze', ...)`)*
+3.  Commit this change and push to GitHub.
+4.  Log into [Vercel](https://vercel.com/) and click **Add New Project**.
+5.  Import your GitHub repository.
+6.  Vercel will detect it as a **Vite** project.
+    *   **Root Directory**: Click "Edit" and change it to `frontend`
+    *   The build command `npm run build` will auto-fill.
+7.  Click **Deploy**.
+
+> **Note on Routing:** We included a custom `vercel.json` file in the frontend folder. This ensures that if users refresh a subpage, Vercel natively handles the client-side React Router instead of throwing a 404 error.
