@@ -1,0 +1,35 @@
+# ============================================================
+# DeepGuard AI — Backend Requirements
+# Install everything with:  pip install -r requirements.txt
+# Compatible with Python 3.12, 3.13, 3.14+
+# ============================================================
+
+# --- Web Framework ---
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0       # ASGI server
+python-multipart>=0.0.9         # Required for file upload
+
+# --- Audio Processing & MFCC ---
+librosa>=0.10.2                 # Core audio analysis + MFCC extraction
+soundfile>=0.12.1               # Read/write WAV, FLAC, OGG audio files
+audioread>=2.1.9                # Fallback audio decoder (MP3 support)
+pydub>=0.25.1                   # Audio format conversion
+imageio-ffmpeg>=0.6.0           # Universal AV transcoding (bundled FFmpeg)
+
+# --- Scientific Computing (Python 3.14 compatible wheels) ---
+numpy>=2.0.0                    # NumPy 2.x has prebuilt wheels for Python 3.13/3.14
+scipy>=1.14.0                   # Signal processing utilities
+
+# --- Machine Learning ---
+scikit-learn>=1.5.1             # RandomForest, feature scaling
+joblib>=1.4.2                   # Model serialization
+
+# --- Neural Networks (HuggingFace) ---
+transformers>=4.40.0            # Core HF library
+torch>=2.0.0                    # PyTorch backend for transformer inference
+protobuf>=3.20.0                # Required by the Wav2Vec2 audio feature extractor
+
+# --- Utility ---
+python-dotenv>=1.0.1            # Load environment variables from .env
+aiofiles>=23.2.1                # Async file I/O for FastAPI
+

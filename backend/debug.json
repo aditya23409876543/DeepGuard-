@@ -1,0 +1,80 @@
+{
+  "is_deepfake": true,
+  "confidence": 96.8,
+  "overall_score": 0.6383,
+  "verdict": "This audio is likely synthesized. The neural network suspects AI generation.",
+  "risk_level": "MEDIUM",
+  "hf_analysis": {
+    "score": 0.0,
+    "confidence": 1.0,
+    "label": "real",
+    "available": true,
+    "model_1_score": 1.0,
+    "model_1_label": "fake",
+    "model_2_score": 0.0,
+    "model_2_label": "real"
+  },
+  "mfcc_analysis": {
+    "score": 0.2774,
+    "confidence": 0.839,
+    "details": "Low CPP (6.7dB) \u2014 natural speech indicator | Extremely clean (SNR=55dB) \u2014 neural TTS has no room noise or breathing | Natural HNR (-0.7dB) \u2014 normal breathiness and noise | Moderately smooth spectrogram (0.873) | Natural phase randomness (1.570) | Natural pitch jitter (CV=1.638) | Highly predictable MFCC trajectory (reg=0.802) \u2014 synthesized speech pattern | Natural background noise detected (AC/fan/room reverb) \u2014 human environment confirmed | Natural speech pauses and breathing detected (4 pauses, 0.2 breaths/sec)",
+    "features": {
+      "cpp_db": 6.69,
+      "snr_db": 55.2,
+      "hnr_db": -0.7,
+      "mel_smoothness": 0.8729,
+      "phase_coherence": 1.57,
+      "jitter_cv": 1.6383,
+      "mfcc_regularity": 0.8024,
+      "ambient_noise": {
+        "low_freq_ratio": 0.33404743671417236,
+        "noise_floor_cv": 0.8680344826547904,
+        "silence_spectral_flatness": 0.39816710965921986,
+        "realness_score": 0.9986253322444149
+      },
+      "pause_pattern": {
+        "num_pauses": 4,
+        "pause_rate_per_sec": 0.663,
+        "pause_irregularity_cv": 0.274,
+        "breath_rate_per_sec": 0.166,
+        "speech_rhythm_cv": 0.889,
+        "human_rhythm_score": 0.7045963653874873
+      },
+      "convergence_boost": 0.0,
+      "duration": 6.03
+    }
+  },
+  "nlp_analysis": {
+    "score": 0.236,
+    "confidence": 0.8088,
+    "details": "Moderate pitch variation (CV=0.2376) | Natural energy variation (CV=1.010) | Natural pause variation (CV=0.582) | Natural rhythm variation (IOI-CV=1.070) | Natural articulation variation (CV=1.221) | Moderately high harmonic clarity (HNR=0.467)",
+    "features": {
+      "pitch": {
+        "pitch_cv": 0.2376442781041715,
+        "pitch_range_semitones": 19.49999999771357,
+        "voicing_ratio": 0.8042328042328042
+      },
+      "energy": {
+        "energy_cv": 1.0101081132888794,
+        "energy_diff_cv": 1.2250773906707764,
+        "energy_kurtosis": 2.6222493648529053
+      },
+      "pauses": {
+        "pause_regularity": 0.5823954686759626,
+        "num_pauses": 7,
+        "speech_ratio": 0.7997
+      },
+      "rhythm": {
+        "ioi_cv": 1.06968000547535,
+        "onset_rate": 8.95
+      },
+      "trajectory": {
+        "centroid_traj_cv": 1.2214991865886484,
+        "centroid_traj_mean": 478.90424869666816
+      },
+      "breathiness": {
+        "hnr_mean": 0.4674
+      }
+    }
+  }
+}
