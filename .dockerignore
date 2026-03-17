@@ -1,0 +1,14 @@
+venv/
+.venv/
+env/
+backend/venv/
+backend/.venv/
+frontend/node_modules/
+.git/
+__pycache__/
+*.pyc
+.env
+debug.json
+*.wav
+*.mp3
+*.m4a
