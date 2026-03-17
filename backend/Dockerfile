@@ -6,7 +6,7 @@ WORKDIR /app
 # Requires libsndfile1 for Audio/MFCC analysis (soundfile/librosa)
 # Requires ffmpeg for PyDub/ImageIO transcoding
 RUN apt-get update && apt-get install -y \
-    libsndfile1 \
+    libsndfile1-dev \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
