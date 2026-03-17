@@ -25,7 +25,8 @@ function App() {
     formData.append('file', selectedFile)
 
     try {
-      const response = await fetch('http://localhost:8000/api/analyze', {
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+      const response = await fetch(`${API_URL}/api/analyze`, {
         method: 'POST',
         body: formData,
       })
