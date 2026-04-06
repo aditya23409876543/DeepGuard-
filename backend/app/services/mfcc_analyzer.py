@@ -15,7 +15,7 @@ import numpy as np
 import librosa
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -44,68 +44,49 @@ def _cv(arr):
 # ---------------------------------------------------------------------------
 
 def compute_cpp(y: np.ndarray, sr: int) -> float:
-    """
-    Cepstral Peak Prominence (CPP) — the most researched feature for TTS detection.
-    
-    Measures how clearly the F0 peak stands out in the cepstrum above the
-    smooth regression baseline. Neural TTS produces unnaturally high CPP
-    because the harmonic structure is perfectly regular.
-    
-    Natural speech CPP (voiced): 5–14 dB
-    Neural TTS CPP:              12–22 dB  (too periodic)
-    
-    Returns average CPP across voiced frames.
-    """
-    frame_len = int(0.025 * sr)  # 25ms
-    hop = int(0.010 * sr)        # 10ms
-    
-    cpp_values = []
-    
-    for start in range(0, len(y) - frame_len, hop):
-        frame = y[start:start + frame_len]
-        if np.std(frame) < 1e-6:
-            continue
+    """Simplified CPP using autocorrelation instead of full cepstrum."""
+    try:
+        # Use autocorrelation as proxy for CPP
+        frame_len = int(0.030 * sr)  # 30ms frame
+        hop = int(0.015 * sr)        # 15ms hop
+        n_fft = 2048
         
-        # Apply Hann window
-        window = np.hanning(len(frame))
-        windowed = frame * window
+        cpp_values = []
         
-        # Power cepstrum
-        spectrum = np.fft.rfft(windowed, n=4096)
-        log_spectrum = np.log(np.abs(spectrum)**2 + 1e-10)
-        cepstrum = np.fft.irfft(log_spectrum)
-        cepstrum = np.abs(cepstrum[:len(cepstrum)//2])
+        for start in range(0, len(y) - frame_len, hop):
+            frame = y[start:start + frame_len]
+            if np.std(frame) < 1e-6:
+                continue
+            
+            # Simple autocorrelation-based CPP proxy
+            acf = np.correlate(frame, frame, mode='full')
+            acf = acf[len(acf)//2:]
+            acf = acf / (acf[0] + 1e-10)
+            
+            # Pitch period range
+            lo = int(0.0025 * sr)
+            hi = int(0.015 * sr)
+            
+            if hi >= len(acf):
+                continue
+            
+            pitch_region = acf[lo:hi]
+            if len(pitch_region) < 2:
+                continue
+                
+            peak_val = float(np.max(pitch_region))
+            mean_val = float(np.mean(acf[hi:hi*2])) if hi*2 < len(acf) else 0.1
+            
+            # CPP proxy: ratio of peak to mean in quefrency region
+            if mean_val > 1e-10:
+                cpp_proxy = peak_val / mean_val
+                cpp_db = 10 * np.log10(cpp_proxy)
+                if cpp_db > 0:
+                    cpp_values.append(cpp_db)
         
-        # Quefrency range corresponding to F0 (60–450 Hz → ~2.2ms to ~16.7ms)
-        q_lo = int(0.0022 * sr)
-        q_hi = int(0.0167 * sr)
-        
-        if q_hi >= len(cepstrum) or q_lo >= q_hi:
-            continue
-        
-        # Find peak in pitch range
-        pitch_region = cepstrum[q_lo:q_hi]
-        peak_val = float(np.max(pitch_region))
-        peak_q = q_lo + int(np.argmax(pitch_region))
-        
-        # Smooth baseline via linear regression over full cepstrum
-        quefrency = np.arange(len(cepstrum), dtype=float)
-        # Fit a line to the cepstrum
-        A = np.vstack([quefrency, np.ones(len(quefrency))]).T
-        try:
-            m_coef, c_coef = np.linalg.lstsq(A, cepstrum, rcond=None)[0]
-        except Exception:
-            continue
-        baseline_at_peak = m_coef * peak_q + c_coef
-        
-        cpp_db = 10 * np.log10(max(peak_val, 1e-10)) - 10 * np.log10(max(baseline_at_peak, 1e-10))
-        if not np.isnan(cpp_db) and cpp_db > 0:
-            cpp_values.append(cpp_db)
-    
-    if not cpp_values:
-        return 8.0  # Default neutral value
-    
-    return float(np.mean(cpp_values))
+        return float(np.mean(cpp_values)) if cpp_values else 8.0
+    except Exception:
+        return 8.0
 
 
 def compute_noise_floor_snr(y: np.ndarray, sr: int) -> float:
@@ -161,109 +142,101 @@ def compute_phase_coherence(y: np.ndarray) -> float:
 
 
 def compute_mel_smoothness(y: np.ndarray, sr: int) -> float:
-    """
-    Measure temporal smoothness of mel-spectrogram.
-    
-    Neural TTS has unnaturally smooth mel-spectrogram transitions
-    because the neural vocoder interpolates between states smoothly.
-    
-    Higher = smoother = more AI-like.
-    Natural speech:  0.75–0.88
-    Neural TTS:      0.90–0.98
-    """
-    mel = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=80, n_fft=N_FFT, hop_length=HOP_LENGTH)
-    mel_db = librosa.power_to_db(mel, ref=np.max)
-    
-    corrs = []
-    for i in range(mel_db.shape[1] - 1):
-        c = np.corrcoef(mel_db[:, i], mel_db[:, i + 1])[0, 1]
-        if not np.isnan(c):
-            corrs.append(c)
-    
-    return float(np.mean(corrs)) if corrs else 0.85
+    """Simplified mel smoothness using fewer bins and frames."""
+    try:
+        mel = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=40, n_fft=N_FFT, hop_length=HOP_LENGTH)
+        mel_db = librosa.power_to_db(mel, ref=np.max)
+        
+        # Sample every 3rd frame for speed
+        step = min(3, mel_db.shape[1] // 10)
+        if step < 1:
+            step = 1
+            
+        corrs = []
+        for i in range(0, mel_db.shape[1] - step, step):
+            c = np.corrcoef(mel_db[:, i], mel_db[:, i + step])[0, 1]
+            if not np.isnan(c):
+                corrs.append(c)
+        
+        return float(np.mean(corrs)) if corrs else 0.85
+    except Exception:
+        return 0.85
 
 
 def compute_pitch_jitter(y: np.ndarray, sr: int) -> float:
-    """
-    Measure pitch jitter — cycle-to-cycle F0 variation.
-    
-    Real speech: jitter CV typically 0.3–0.8 (irregular micro-variations)
-    Neural TTS:  jitter CV < 0.15 (extremely regular, computer-generated timing)
-    """
+    """Simplified pitch jitter using autocorrelation instead of pyin."""
     try:
-        f0, voiced, _ = librosa.pyin(
-            y, fmin=librosa.note_to_hz('C2'),
-            fmax=librosa.note_to_hz('C7'),
-            sr=sr, frame_length=1024
-        )
-        f0_voiced = f0[~np.isnan(f0)]
-        if len(f0_voiced) < 10:
+        # Use autocorrelation for faster pitch estimation
+        autocorr = np.correlate(y, y, mode='full')
+        autocorr = autocorr[len(autocorr)//2:]
+        autocorr = autocorr / (autocorr[0] + 1e-10)
+        
+        # Find first significant peak after initial decay (pitch period range)
+        min_lag = int(0.003 * sr)  # ~300 Hz max
+        max_lag = int(0.015 * sr)  # ~66 Hz min
+        
+        if max_lag >= len(autocorr):
             return 0.3
         
-        # Jitter = frame-to-frame F0 variation
-        f0_diff = np.abs(np.diff(f0_voiced))
-        jitter_cv = float(np.std(f0_diff) / (np.mean(f0_diff) + 1e-10))
-        return jitter_cv
+        segment = autocorr[min_lag:max_lag]
+        if len(segment) < 2:
+            return 0.3
+            
+        peak_idx = np.argmax(segment)
+        first_peak = segment[peak_idx]
+        
+        # Very high first peak = too periodic = AI
+        if first_peak > 0.8:
+            return 0.1  # Low jitter = AI
+        elif first_peak > 0.5:
+            return 0.4
+        else:
+            return 0.6
     except Exception:
         return 0.3
 
 
 def compute_spectral_entropy(y: np.ndarray, sr: int) -> float:
-    """
-    Spectral entropy measures how spread the energy is across the spectrum.
-    
-    Neural TTS vocoders produce unnaturally ordered spectra (lower entropy).
-    Real speech has more spectral randomness.
-    
-    Lower entropy = more ordered = more AI-like.
-    """
-    stft = np.abs(librosa.stft(y, n_fft=N_FFT, hop_length=HOP_LENGTH))
-    
-    # Per-frame spectral entropy
-    entropies = []
-    for i in range(stft.shape[1]):
-        frame = stft[:, i]
-        frame_norm = frame / (np.sum(frame) + 1e-10)
-        entropy = -np.sum(frame_norm * np.log(frame_norm + 1e-10))
-        entropies.append(entropy)
-    
-    return float(np.mean(entropies))
+    """Simplified spectral entropy using downsampled STFT."""
+    try:
+        # Use smaller FFT for speed
+        stft = np.abs(librosa.stft(y, n_fft=1024, hop_length=256))
+        
+        # Sample every 4th frame
+        entropies = []
+        for i in range(0, stft.shape[1], 4):
+            frame = stft[:, i]
+            frame_norm = frame / (np.sum(frame) + 1e-10)
+            entropy = -np.sum(frame_norm * np.log(frame_norm + 1e-10))
+            entropies.append(entropy)
+        
+        return float(np.mean(entropies)) if entropies else 4.0
+    except Exception:
+        return 4.0
 
 
 def compute_hnr(y: np.ndarray, sr: int) -> float:
-    """
-    Harmonics-to-Noise Ratio (HNR) proxy via autocorrelation.
-    
-    Neural TTS is too harmonic — lacks breathiness and natural aperiodic noise.
-    Real speech (conversational): HNR 10–20 dB
-    Neural TTS:                   HNR 25–40 dB  (too periodic)
-    """
-    frame_len = int(0.025 * sr)
-    hop = int(0.010 * sr)
-    
-    hnr_values = []
-    
-    for start in range(0, len(y) - frame_len, hop):
-        frame = y[start:start + frame_len]
-        if np.std(frame) < 1e-6:
-            continue
-        
-        # Autocorrelation
-        ac = np.correlate(frame, frame, mode='full')
+    """Simplified HNR using single autocorrelation."""
+    try:
+        # Quick autocorrelation on full signal
+        ac = np.correlate(y, y, mode='full')
         ac = ac[len(ac)//2:]
         ac = ac / (ac[0] + 1e-10)
         
-        # Find the peak in the pitch period range (2ms–15ms)
-        lo = max(1, int(0.002 * sr))
+        # Pitch period range
+        lo = max(1, int(0.003 * sr))
         hi = int(0.015 * sr)
         
-        if hi < len(ac):
-            peak = float(np.max(ac[lo:hi]))
-            if peak > 0.01:
-                hnr_db = 10 * np.log10(peak / (1 - peak + 1e-10))
-                hnr_values.append(hnr_db)
-    
-    return float(np.mean(hnr_values)) if hnr_values else 5.0
+        if hi >= len(ac):
+            return 5.0
+            
+        peak = float(np.max(ac[lo:hi]))
+        if peak > 0.01:
+            hnr_db = 10 * np.log10(peak / (1 - peak + 1e-10))
+            return float(np.clip(hnr_db, -10, 40))
+        return 5.0
+    except Exception:
+        return 5.0
 
 
 def compute_mfcc_regularity(y: np.ndarray, sr: int) -> float:
@@ -288,208 +261,120 @@ def compute_mfcc_regularity(y: np.ndarray, sr: int) -> float:
 
 
 def compute_ambient_noise_profile(y: np.ndarray, sr: int) -> dict:
-    """
-    Detect ambient environmental noise (AC hum, fan, traffic, room reverb).
-    
-    Real recordings almost always contain low-level background noise from the
-    environment. AI-generated audio is synthesized in a virtual vacuum — there
-    is no room, no air conditioner, no distant traffic.
-    
-    We measure:
-    1. Low-frequency energy ratio (< 300 Hz) — AC hum, fan motors, rumble
-    2. Noise-floor variance across time — real environments fluctuate
-    3. Spectral flatness of silence frames — real silence has colored noise
-    
-    Returns a dict with sub-metrics and a combined "realness" score (0 = AI-clean, 1 = human-environment).
-    """
-    # 1. Low-frequency energy ratio (ambient hum)
-    stft = np.abs(librosa.stft(y, n_fft=N_FFT, hop_length=HOP_LENGTH))
-    freqs = librosa.fft_frequencies(sr=sr, n_fft=N_FFT)
-    low_mask = freqs < 300  # AC, fans, HVAC typically < 300 Hz
-    total_energy = np.sum(stft ** 2)
-    low_energy = np.sum(stft[low_mask, :] ** 2)
-    low_freq_ratio = float(low_energy / (total_energy + 1e-10))
-    
-    # 2. Noise-floor variance over time
-    # Compute energy in short frames and look at the quietest 15%
-    frame_len = int(0.025 * sr)
-    hop = frame_len // 2
-    frames = librosa.util.frame(y, frame_length=frame_len, hop_length=hop)
-    frame_energies = np.sqrt(np.mean(frames ** 2, axis=0))
-    
-    sorted_e = np.sort(frame_energies)
-    quiet_frames = sorted_e[:max(3, len(sorted_e) // 7)]  # Quietest ~15%
-    noise_floor_std = float(np.std(quiet_frames))
-    noise_floor_mean = float(np.mean(quiet_frames))
-    noise_floor_cv = noise_floor_std / (noise_floor_mean + 1e-10)  # Variation in noise floor
-    
-    # 3. Spectral flatness of quiet frames (Wiener entropy)
-    # Real ambient noise has "colored" spectral shape; AI silence is flat or zero
-    quiet_threshold = np.percentile(frame_energies, 20)
-    quiet_mask = frame_energies < quiet_threshold
-    quiet_indices = np.where(quiet_mask)[0]
-    
-    spectral_flatness_values = []
-    for idx in quiet_indices:
-        start = idx * hop
-        end = start + frame_len
-        if end > len(y):
-            break
-        segment = y[start:end]
-        if np.std(segment) < 1e-8:
-            spectral_flatness_values.append(0.0)  # Dead silence = AI indicator
-            continue
-        spec = np.abs(np.fft.rfft(segment * np.hanning(len(segment))))
-        spec = spec[1:]  # Remove DC
-        geo_mean = np.exp(np.mean(np.log(spec + 1e-10)))
-        arith_mean = np.mean(spec)
-        sf = geo_mean / (arith_mean + 1e-10)
-        spectral_flatness_values.append(float(sf))
-    
-    avg_spectral_flatness = float(np.mean(spectral_flatness_values)) if spectral_flatness_values else 0.0
-    
-    # Combine sub-metrics into a "realness" score
-    # Real recordings: higher low_freq_ratio, higher noise_floor_cv, higher spectral_flatness
-    realness = (
-        min(low_freq_ratio * 5.0, 1.0) * 0.35 +  # Low-freq ambient energy
-        min(noise_floor_cv * 3.0, 1.0) * 0.35 +   # Background noise variation
-        min(avg_spectral_flatness * 2.5, 1.0) * 0.30   # Colored noise in silence
-    )
-    
-    return {
-        'low_freq_ratio': low_freq_ratio,
-        'noise_floor_cv': noise_floor_cv,
-        'silence_spectral_flatness': avg_spectral_flatness,
-        'realness_score': float(np.clip(realness, 0, 1)),
-    }
+    """Simplified ambient noise profile."""
+    try:
+        # Low-frequency energy ratio
+        stft = np.abs(librosa.stft(y, n_fft=1024, hop_length=256))
+        freqs = librosa.fft_frequencies(sr=sr, n_fft=1024)
+        low_mask = freqs < 300
+        total_energy = np.sum(stft ** 2) + 1e-10
+        low_energy = np.sum(stft[low_mask, :] ** 2)
+        low_freq_ratio = float(low_energy / total_energy)
+        
+        # Noise floor variance
+        frame_len = 512
+        hop = 256
+        frames = np.array([y[i:i+frame_len] for i in range(0, len(y)-frame_len, hop)])
+        frame_energies = np.sqrt(np.mean(frames**2, axis=1))
+        
+        sorted_e = np.sort(frame_energies)
+        quiet_frames = sorted_e[:max(1, len(sorted_e) // 7)]
+        noise_floor_cv = float(np.std(quiet_frames) / (np.mean(quiet_frames) + 1e-10))
+        
+        # Simplified realness
+        realness = (
+            min(low_freq_ratio * 5.0, 1.0) * 0.5 +
+            min(noise_floor_cv * 3.0, 1.0) * 0.5
+        )
+        
+        return {
+            'low_freq_ratio': low_freq_ratio,
+            'noise_floor_cv': noise_floor_cv,
+            'silence_spectral_flatness': 0.0,
+            'realness_score': float(np.clip(realness, 0, 1)),
+        }
+    except Exception:
+        return {'realness_score': 0.5}
 
 
 def compute_natural_pause_pattern(y: np.ndarray, sr: int) -> dict:
-    """
-    Detect natural human speech pauses, breathing gaps, and timing irregularity.
-    
-    Humans pause to breathe, think, and emphasize. These pauses are:
-    - Irregularly spaced (not metronomic)
-    - Often contain breath sounds (soft noise bursts)
-    - Range from 200ms to 2+ seconds
-    
-    AI-generated speech typically has:
-    - Very few or no pauses (continuous TTS output)
-    - Perfectly regular timing if pauses exist
-    - Dead silence in gaps (no breath noise)
-    
-    Returns dict with sub-metrics and a "human_rhythm" score (0 = robotic, 1 = natural human).
-    """
-    # Compute short-term RMS energy
-    frame_len = int(0.020 * sr)  # 20ms
-    hop = int(0.010 * sr)        # 10ms
-    frames = librosa.util.frame(y, frame_length=frame_len, hop_length=hop)
-    rms = np.sqrt(np.mean(frames ** 2, axis=0))
-    
-    # Adaptive silence threshold — below 20% of median RMS = silence
-    median_rms = np.median(rms)
-    silence_threshold = median_rms * 0.20
-    
-    is_silent = rms < silence_threshold
-    
-    # 1. Find silence segments (contiguous runs of silent frames)
-    silence_durations = []
-    current_run = 0
-    for val in is_silent:
-        if val:
-            current_run += 1
+    """Simplified natural pause pattern detection."""
+    try:
+        frame_len = int(0.025 * sr)
+        hop = int(0.010 * sr)
+        frames = np.array([y[i:i+frame_len] for i in range(0, len(y)-frame_len, hop)])
+        rms = np.sqrt(np.mean(frames**2, axis=1))
+        
+        median_rms = np.median(rms)
+        silence_threshold = median_rms * 0.20
+        is_silent = rms < silence_threshold
+        
+        # Find silence segments
+        silence_durations = []
+        current_run = 0
+        for val in is_silent:
+            if val:
+                current_run += 1
+            else:
+                if current_run > 5:
+                    duration_ms = (current_run * hop / sr) * 1000
+                    if duration_ms >= 150:
+                        silence_durations.append(duration_ms)
+                current_run = 0
+        if current_run > 5:
+            duration_ms = (current_run * hop / sr) * 1000
+            if duration_ms >= 150:
+                silence_durations.append(duration_ms)
+        
+        total_duration_s = len(y) / sr
+        num_pauses = len(silence_durations)
+        pause_rate = num_pauses / max(total_duration_s, 0.1)
+        
+        if num_pauses >= 2:
+            pause_cv = float(np.std(silence_durations) / (np.mean(silence_durations) + 1e-10))
         else:
-            if current_run > 0:
-                duration_ms = (current_run * hop / sr) * 1000
-                if duration_ms >= 150:  # Only count pauses > 150ms
-                    silence_durations.append(duration_ms)
-            current_run = 0
-    # Handle trailing silence
-    if current_run > 0:
-        duration_ms = (current_run * hop / sr) * 1000
-        if duration_ms >= 150:
-            silence_durations.append(duration_ms)
-    
-    total_duration_s = len(y) / sr
-    num_pauses = len(silence_durations)
-    pause_rate = num_pauses / max(total_duration_s, 0.1)  # Pauses per second
-    
-    # 2. Pause timing irregularity (CV of inter-pause intervals)
-    if num_pauses >= 2:
-        pause_cv = float(np.std(silence_durations) / (np.mean(silence_durations) + 1e-10))
-    else:
-        pause_cv = 0.0  # No variation = robotic
-    
-    # 3. Breath detection in pauses — check for soft noise bursts in silence gaps
-    breath_count = 0
-    run_start = 0
-    in_silence = False
-    for i, val in enumerate(is_silent):
-        if val and not in_silence:
-            run_start = i
-            in_silence = True
-        elif not val and in_silence:
-            in_silence = False
-            # Check if this silence region contained breath-like noise
-            start_sample = run_start * hop
-            end_sample = min(i * hop + frame_len, len(y))
-            segment = y[start_sample:end_sample]
-            if len(segment) > 0:
-                seg_rms = np.sqrt(np.mean(segment ** 2))
-                # Breath = noise above absolute zero but below speech
-                if seg_rms > 1e-5 and seg_rms < median_rms * 0.15:
-                    breath_count += 1
-    
-    breath_rate = breath_count / max(total_duration_s, 0.1)
-    
-    # 4. Speech rhythm irregularity — measure variance of voiced segment durations
-    voiced_durations = []
-    current_voiced = 0
-    for val in is_silent:
-        if not val:
-            current_voiced += 1
-        else:
-            if current_voiced > 0:
-                dur_ms = (current_voiced * hop / sr) * 1000
-                if dur_ms >= 50:  # Only count voiced segments > 50ms
-                    voiced_durations.append(dur_ms)
-            current_voiced = 0
-    
-    if len(voiced_durations) >= 2:
-        rhythm_cv = float(np.std(voiced_durations) / (np.mean(voiced_durations) + 1e-10))
-    else:
-        rhythm_cv = 0.0
-    
-    # Combine into a "human rhythm" score
-    # Real humans: pause_rate ~0.3-1.5/sec, pause_cv > 0.4, breath_rate > 0, rhythm_cv > 0.3
-    pause_score = min(pause_rate / 0.8, 1.0) * 0.25  # Having pauses at all
-    irregularity_score = min(pause_cv / 0.6, 1.0) * 0.30  # Pauses are irregular
-    breath_score = min(breath_rate / 0.3, 1.0) * 0.20  # Breath detected
-    rhythm_score = min(rhythm_cv / 0.5, 1.0) * 0.25  # Speech timing varies
-    
-    human_rhythm = pause_score + irregularity_score + breath_score + rhythm_score
-    
-    return {
-        'num_pauses': num_pauses,
-        'pause_rate_per_sec': round(pause_rate, 3),
-        'pause_irregularity_cv': round(pause_cv, 3),
-        'breath_rate_per_sec': round(breath_rate, 3),
-        'speech_rhythm_cv': round(rhythm_cv, 3),
-        'human_rhythm_score': float(np.clip(human_rhythm, 0, 1)),
-    }
+            pause_cv = 0.0
+        
+        human_rhythm = (
+            min(pause_rate / 0.8, 1.0) * 0.4 +
+            min(pause_cv / 0.6, 1.0) * 0.6
+        )
+        
+        return {
+            'num_pauses': num_pauses,
+            'pause_rate_per_sec': round(pause_rate, 3),
+            'pause_irregularity_cv': round(pause_cv, 3),
+            'breath_rate_per_sec': 0.0,
+            'speech_rhythm_cv': round(pause_cv, 3),
+            'human_rhythm_score': float(np.clip(human_rhythm, 0, 1)),
+        }
+    except Exception:
+        return {'human_rhythm_score': 0.5}
 
 
 # ---------------------------------------------------------------------------
 # Core analysis function
 # ---------------------------------------------------------------------------
 
-def analyze_mfcc(audio_path: str) -> MFCCResult:
+def analyze_mfcc(
+    audio_path: str = None,
+    audio_array: Optional[np.ndarray] = None,
+    sample_rate: int = TARGET_SR
+) -> MFCCResult:
     """
     Analyze audio for AI-generation using advanced acoustic features.
     Tuned to detect modern neural TTS systems including ElevenLabs.
+    
+    Accepts either an audio file path OR a pre-loaded audio array.
     """
     try:
-        y, sr = librosa.load(audio_path, sr=TARGET_SR, mono=True)
+        if audio_array is None:
+            if audio_path is None:
+                return MFCCResult(score=0.5, confidence=0.0, details="No audio provided")
+            y, sr = librosa.load(audio_path, sr=TARGET_SR, mono=True)
+        else:
+            y = audio_array
+            sr = sample_rate
     except Exception as e:
         logger.error(f"Load error: {e}")
         return MFCCResult(score=0.5, confidence=0.0, details="Could not load audio")
@@ -658,25 +543,41 @@ def analyze_mfcc(audio_path: str) -> MFCCResult:
     agreement = max(0.0, 1.0 - float(np.std(values)))
     confidence = float(np.clip(0.5 * duration_factor + 0.5 * agreement, 0, 1))
 
+    def safe_float(val, default=0.0):
+        if val is None or (isinstance(val, float) and (np.isnan(val) or np.isinf(val))):
+            return default
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+
     export_features = {
-        'cpp_db': round(cpp, 2),
-        'snr_db': round(snr, 1),
-        'hnr_db': round(hnr, 1),
-        'mel_smoothness': round(mel_smooth, 4),
-        'phase_coherence': round(phase_coherence, 3),
-        'jitter_cv': round(jitter_cv, 4),
-        'mfcc_regularity': round(mfcc_reg, 4),
+        'cpp_db': safe_float(cpp, 8.0),
+        'snr_db': safe_float(snr, 30.0),
+        'hnr_db': safe_float(hnr, 5.0),
+        'mel_smoothness': safe_float(mel_smooth, 0.85),
+        'phase_coherence': safe_float(phase_coherence, 1.5),
+        'jitter_cv': safe_float(jitter_cv, 0.3),
+        'mfcc_regularity': safe_float(mfcc_reg, 0.5),
         'ambient_noise': ambient_profile,
         'pause_pattern': pause_pattern,
-        'convergence_boost': round(boost, 3),
-        'duration': round(duration, 2),
+        'convergence_boost': safe_float(boost, 0.0),
+        'duration': safe_float(duration, 1.0),
     }
 
     logger.info(f"Final score: {final_score:.3f} (base={base_score:.3f}, boost={boost:.3f}), confidence={confidence:.3f}")
 
+    def safe_float(val, default=0.5):
+        if val is None or (isinstance(val, float) and (np.isnan(val) or np.isinf(val))):
+            return default
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+
     return MFCCResult(
-        score=round(final_score, 4),
-        confidence=round(confidence, 4),
+        score=safe_float(final_score, 0.5),
+        confidence=safe_float(confidence, 0.5),
         features=export_features,
         details=" | ".join(details),
     )

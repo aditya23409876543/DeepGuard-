@@ -1,80 +1,91 @@
 {
-  "is_deepfake": false,
-  "confidence": 97.1,
-  "overall_score": 0.0758,
-  "verdict": "This audio appears to be authentic human speech. No deepfake signatures detected.",
+  "is_deepfake": true,
+  "confidence": 83.7,
+  "overall_score": 0.2932,
+  "verdict": "Likely authentic (Neural model offline)",
   "risk_level": "LOW",
   "hf_analysis": {
-    "score": 0.0,
-    "confidence": 1.0,
-    "label": "real",
-    "available": true,
-    "model_1_score": 0.9999,
-    "model_1_label": "fake",
-    "model_2_score": 0.0,
-    "model_2_label": "real"
+    "score": 0.5,
+    "confidence": 0.0,
+    "label": "unavailable",
+    "available": false,
+    "model_1_score": 0.5,
+    "model_1_label": "error",
+    "model_2_score": 0.5,
+    "model_2_label": "error"
   },
   "mfcc_analysis": {
-    "score": 0.2636,
-    "confidence": 0.8573,
-    "details": "Low CPP (6.7dB) \u2014 natural speech indicator | Extremely clean (SNR=62dB) \u2014 neural TTS has no room noise or breathing | Natural HNR (-0.7dB) \u2014 normal breathiness and noise | Moderately smooth spectrogram (0.870) | Natural phase randomness (1.576) | Natural pitch jitter (CV=1.760) | Regular MFCC trajectory (0.777) \u2014 AI indicator | Natural background noise detected (AC/fan/room reverb) \u2014 human environment confirmed | Natural speech pauses and breathing detected (3 pauses, 0.8 breaths/sec)",
+    "score": 0.2494,
+    "confidence": 0.8371644016230928,
+    "details": "Low CPP (7.4dB) \u2014 natural speech indicator | Extremely clean (SNR=62dB) \u2014 neural TTS has no room noise or breathing | Natural HNR (-4.3dB) \u2014 normal breathiness and noise | Natural spectral variation (0.675) | Natural phase randomness (1.568) | Natural pitch jitter (CV=0.600) | Highly predictable MFCC trajectory (reg=0.823) \u2014 synthesized speech pattern | Natural background noise detected (AC/fan/room reverb) \u2014 human environment confirmed | Natural speech pauses and breathing detected (5 pauses, 0.0 breaths/sec)",
     "features": {
-      "cpp_db": 6.68,
-      "snr_db": 62.2,
-      "hnr_db": -0.7,
-      "mel_smoothness": 0.8703,
-      "phase_coherence": 1.576,
-      "jitter_cv": 1.76,
-      "mfcc_regularity": 0.7766,
+      "cpp_db": 7.436517145476972,
+      "snr_db": 62.39411959372697,
+      "hnr_db": -4.323953340140275,
+      "mel_smoothness": 0.674958078684321,
+      "phase_coherence": 1.5681524276733398,
+      "jitter_cv": 0.6,
+      "mfcc_regularity": 0.8227065405428471,
       "ambient_noise": {
-        "low_freq_ratio": 0.7485453486442566,
-        "noise_floor_cv": 0.60999062546652,
-        "silence_spectral_flatness": 0.5495642943934407,
+        "low_freq_ratio": 0.28488272428512573,
+        "noise_floor_cv": 1.2637600898742676,
+        "silence_spectral_flatness": 0.0,
         "realness_score": 1.0
       },
       "pause_pattern": {
-        "num_pauses": 3,
-        "pause_rate_per_sec": 0.378,
-        "pause_irregularity_cv": 0.242,
-        "breath_rate_per_sec": 0.756,
-        "speech_rhythm_cv": 0.629,
-        "human_rhythm_score": 0.6889179729392013
+        "num_pauses": 5,
+        "pause_rate_per_sec": 0.5,
+        "pause_irregularity_cv": 0.592,
+        "breath_rate_per_sec": 0.0,
+        "speech_rhythm_cv": 0.592,
+        "human_rhythm_score": 0.8422307923312474
       },
       "convergence_boost": 0.0,
-      "duration": 7.94
+      "duration": 10.0
     }
   },
   "nlp_analysis": {
-    "score": 0.236,
-    "confidence": 0.928,
-    "details": "Moderate pitch variation (CV=0.1819) | Natural energy variation (CV=0.968) | Natural pause variation (CV=0.805) | Natural rhythm variation (IOI-CV=1.216) | Natural articulation variation (CV=1.322) | Moderately high harmonic clarity (HNR=0.470)",
+    "score": 0.22379999999999997,
+    "confidence": 0.8739158129572855,
+    "details": "Natural pitch variation (CV=0.3169) | Natural energy variation (CV=0.904) | Natural pause variation (CV=0.844) | Natural rhythm variation (IOI-CV=1.106) | Natural articulation variation (CV=1.578) | Abnormally high harmonic clarity (HNR=0.611) \u2014 synthesized speech indicator",
     "features": {
       "pitch": {
-        "pitch_cv": 0.1818692925550212,
-        "pitch_range_semitones": 15.099999998509972,
-        "voicing_ratio": 0.8393574297188755
+        "pitch_cv": 0.31694234307218644,
+        "pitch_range_semitones": 23.699999996744836,
+        "voicing_ratio": 0.853035143769968
       },
       "energy": {
-        "energy_cv": 0.9680047631263733,
-        "energy_diff_cv": 1.2746050357818604,
-        "energy_kurtosis": 2.1049535274505615
+        "energy_cv": 0.9036288261413574,
+        "energy_diff_cv": 1.39081871509552,
+        "energy_kurtosis": 3.4404025077819824
       },
       "pauses": {
-        "pause_regularity": 0.8054489876301169,
+        "pause_regularity": 0.8444753146819294,
         "num_pauses": 6,
-        "speech_ratio": 0.8
+        "speech_ratio": 0.8002
       },
       "rhythm": {
-        "ioi_cv": 1.2155217294611576,
-        "onset_rate": 6.8
+        "ioi_cv": 1.1057738573973004,
+        "onset_rate": 6.3
       },
       "trajectory": {
-        "centroid_traj_cv": 1.322092740676227,
-        "centroid_traj_mean": 438.5905202785204
+        "centroid_traj_cv": 1.5779253431220186,
+        "centroid_traj_mean": 311.523839685096
       },
       "breathiness": {
-        "hnr_mean": 0.4703
+        "hnr_mean": 0.6108
       }
+    }
+  },
+  "waveform_analysis": {
+    "score": 0.4125000000000001,
+    "confidence": 0.812917130661303,
+    "details": "Natural dynamic range | No clipping - suspicious",
+    "features": {
+      "peak_to_avg": 6.921764373779297,
+      "hf_ratio": 0.15,
+      "clipping_ratio": 0.0,
+      "near_silent_ratio": 0.13141025641025642
     }
   }
 }

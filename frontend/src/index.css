@@ -539,6 +539,31 @@ body {
   font-size: 0.95rem;
 }
 
+.progress-bar-container {
+  width: 100%;
+  max-width: 400px;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  margin: 1.5rem auto 0.5rem;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--gradient-primary);
+  border-radius: 4px;
+  transition: width 0.3s ease-out;
+  box-shadow: 0 0 10px rgba(107, 0, 255, 0.4);
+}
+
+.progress-percent {
+  color: var(--primary-300);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
 .loading-steps {
   margin-top: 2rem;
   display: flex;

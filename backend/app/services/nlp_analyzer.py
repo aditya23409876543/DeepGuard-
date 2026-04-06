@@ -16,6 +16,7 @@ import numpy as np
 import librosa
 import logging
 from dataclasses import dataclass, field
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -212,9 +213,24 @@ def _analyze_breathiness(y, sr):
 # Scoring
 # ---------------------------------------------------------------------------
 
-def analyze_nlp(audio_path: str) -> NLPResult:
+def analyze_nlp(
+    audio_path: str = None,
+    audio_array: Optional[np.ndarray] = None,
+    sample_rate: int = TARGET_SR
+) -> NLPResult:
+    """
+    Analyze audio for AI-generation using prosodic features.
+    
+    Accepts either an audio file path OR a pre-loaded audio array.
+    """
     try:
-        y, sr = librosa.load(audio_path, sr=TARGET_SR, mono=True)
+        if audio_array is None:
+            if audio_path is None:
+                return NLPResult(score=0.5, confidence=0.0, details="No audio provided")
+            y, sr = librosa.load(audio_path, sr=TARGET_SR, mono=True)
+        else:
+            y = audio_array
+            sr = sample_rate
     except Exception as e:
         logger.error(f"NLP load error: {e}")
         return NLPResult(score=0.5, confidence=0.0, details="Could not load audio")
@@ -303,18 +319,38 @@ def analyze_nlp(audio_path: str) -> NLPResult:
     agreement = max(0, 1.0 - float(np.std(values)))
     confidence = float(np.clip(0.5 * duration_factor + 0.5 * agreement, 0, 1))
 
-    all_features = {
+    def clean_dict(d):
+        """Recursively clean NaN/inf from dict."""
+        if isinstance(d, dict):
+            return {k: clean_dict(v) for k, v in d.items()}
+        elif isinstance(d, (list, tuple)):
+            return [clean_dict(v) for v in d]
+        elif isinstance(d, float):
+            if np.isnan(d) or np.isinf(d):
+                return 0.0
+            return d
+        return d
+
+    all_features = clean_dict({
         'pitch': pitch,
         'energy': energy,
         'pauses': pauses,
         'rhythm': rhythm,
         'trajectory': traj,
         'breathiness': breath,
-    }
+    })
+
+    def safe_float(val, default=0.5):
+        if val is None or (isinstance(val, float) and (np.isnan(val) or np.isinf(val))):
+            return default
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
 
     return NLPResult(
-        score=round(final, 4),
-        confidence=round(confidence, 4),
+        score=safe_float(final, 0.5),
+        confidence=safe_float(confidence, 0.5),
         features=all_features,
         details=" | ".join(details),
     )

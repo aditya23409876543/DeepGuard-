@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import './index.css'
 import Header from './components/Header'
 import UploadPage from './pages/UploadPage'
 import ResultsPage from './pages/ResultsPage'
 
 function App() {
-  const [currentView, setCurrentView] = useState('upload') // 'upload' | 'loading' | 'results' | 'error'
+  const [currentView, setCurrentView] = useState('upload')
   const [selectedFile, setSelectedFile] = useState(null)
   const [analysisResult, setAnalysisResult] = useState(null)
   const [error, setError] = useState(null)
@@ -15,7 +15,7 @@ function App() {
     setError(null)
   }
 
-  const handleAnalyze = async () => {
+  const handleAnalyze = useCallback(async () => {
     if (!selectedFile) return
 
     setCurrentView('loading')
@@ -44,7 +44,7 @@ function App() {
       setError(err.message || 'Failed to analyze audio. Make sure the backend server is running.')
       setCurrentView('error')
     }
-  }
+  }, [selectedFile])
 
   const handleReset = () => {
     setSelectedFile(null)
@@ -71,7 +71,7 @@ function App() {
         )}
         {currentView === 'results' && analysisResult && (
           <ResultsPage
-            result={analysisResult}
+            result={analysisResult.result || analysisResult}
             file={selectedFile}
             onReset={handleReset}
           />

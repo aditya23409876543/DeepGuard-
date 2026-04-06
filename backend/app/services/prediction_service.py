@@ -3,33 +3,46 @@ Combined Prediction Service for Deepfake Audio Detection.
 
 Orchestrates the primary HuggingFace Neural TTS model alongside
 MFCC and NLP heuristic backup analysis.
+
+Optimizations:
+- Single audio load (shared across all analyzers)
+- Parallel execution of all three analyzers
+- Real-time progress updates via callback
 """
 
+import asyncio
 import logging
 import numpy as np
 from dataclasses import dataclass
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from .mfcc_analyzer import analyze_mfcc, MFCCResult
 from .nlp_analyzer import analyze_nlp, NLPResult
 from .hf_detector import run_hf_detection, HFResult, DualHFResult
+from .waveform_analyzer import analyze_waveform, WaveformResult
+from .audio_loader import load_audio
 
 logger = logging.getLogger(__name__)
 
-# Weights: HF model is extremely accurate, heuristics are fallback/explainability
-HF_WEIGHT = 0.70
-MFCC_WEIGHT = 0.18
-NLP_WEIGHT = 0.12
+_executor = ThreadPoolExecutor(max_workers=3)
 
-DEEPFAKE_THRESHOLD = 0.50
+
+# Weights: HF model is primary, heuristics detect sophisticated TTS
+HF_WEIGHT = 0.65
+MFCC_WEIGHT = 0.15
+NLP_WEIGHT = 0.10
+WAVE_WEIGHT = 0.10
+
+DEEPFAKE_THRESHOLD = 0.20
 
 
 @dataclass
 class PredictionResult:
     """Final prediction result combining all analyses."""
     is_deepfake: bool
-    confidence: float  # 0-100%
-    overall_score: float  # 0.0 (real) to 1.0 (fake)
+    confidence: float
+    overall_score: float
     verdict: str
     risk_level: str
 
@@ -52,6 +65,11 @@ class PredictionResult:
     nlp_confidence: float
     nlp_details: str
     nlp_features: dict
+
+    wave_score: float
+    wave_confidence: float
+    wave_details: str
+    wave_features: dict
 
     def to_dict(self) -> dict:
         return {
@@ -82,106 +100,122 @@ class PredictionResult:
                 'confidence': self.nlp_confidence,
                 'details': self.nlp_details,
                 'features': self.nlp_features,
+            },
+            'waveform_analysis': {
+                'score': self.wave_score,
+                'confidence': self.wave_confidence,
+                'details': self.wave_details,
+                'features': self.wave_features,
             }
         }
 
 
 def get_risk_level(score: float) -> str:
-    if score >= 0.85: return "CRITICAL"
-    if score >= 0.65: return "HIGH"
-    if score >= 0.45: return "MEDIUM"
-    return "LOW"
+    if score >= 0.70: return "CRITICAL"
+    if score >= 0.50: return "HIGH"
+    if score >= 0.35: return "MEDIUM"
+    if score >= 0.20: return "LOW"
+    return "MINIMAL"
 
 
 def get_verdict(score: float, hf_available: bool, hf_score: float) -> str:
     if not hf_available:
-        if score >= 0.7: return "Likely AI-generated (Neural model offline, based on acoustics)"
-        if score >= 0.45: return "Possible AI-generation (Neural model offline)"
+        if score >= 0.5: return "Likely AI-generated (Neural model offline, based on acoustics)"
+        if score >= 0.30: return "Possible AI-generation (Neural model offline)"
         return "Likely authentic (Neural model offline)"
 
-    if score >= 0.85:
-        return "This audio is almost certainly AI-generated. The neural detection model found definitive synthetic patterns."
-    elif score >= 0.65:
-        return "This audio shows strong signs of being AI-generated, confirmed by the neural model."
+    if score >= 0.70:
+        return "This audio is almost certainly AI-generated. Strong synthetic patterns detected."
     elif score >= 0.50:
-        return "This audio is likely synthesized. The neural network suspects AI generation."
-    elif hf_score > 0.6 and score < 0.50:
-        return "Ambiguous: The neural model suspects AI, but basic acoustic properties appear natural."
+        return "This audio shows strong signs of being AI-generated."
     elif score >= 0.35:
-        return "This audio appears mostly authentic, though some minor anomalous features were detected."
+        return "This audio shows moderate signs of AI generation."
+    elif score >= 0.25:
+        return "This audio has minor anomalies that may indicate AI generation."
     else:
-        return "This audio appears to be authentic human speech. No deepfake signatures detected."
+        return "This audio appears to be authentic human speech."
 
 
 async def predict(audio_path: str) -> PredictionResult:
-    """Run the complete 3-stage prediction pipeline."""
+    """Run the complete 3-stage prediction pipeline with parallel execution."""
     logger.info(f"Starting prediction for: {audio_path}")
     
-    # Run the HuggingFace model
-    hf_result = run_hf_detection(audio_path)
+    y, sr = load_audio(audio_path)
     
-    # Run heuristic backups
-    mfcc_result = analyze_mfcc(audio_path)
+    loop = asyncio.get_event_loop()
     
-    # If MFCC failed to even load the audio, the file is corrupted or unsupported
+    hf_result, mfcc_result, nlp_result, wave_result = await asyncio.gather(
+        loop.run_in_executor(_executor, run_hf_detection, None, y, sr),
+        loop.run_in_executor(_executor, analyze_mfcc, None, y, sr),
+        loop.run_in_executor(_executor, analyze_nlp, None, y, sr),
+        loop.run_in_executor(_executor, analyze_waveform, None, y, sr),
+    )
+    
     if mfcc_result.details == "Could not load audio":
         from fastapi import HTTPException
         raise HTTPException(
             status_code=400, 
-            detail="Could not decode audio file. It may be corrupted or use an unsupported codec (e.g. missing ffmpeg for MPEGG)."
+            detail="Could not decode audio file. It may be corrupted or use an unsupported codec."
         )
-        
-    nlp_result = analyze_nlp(audio_path)
     
-    # Calculate weighted score
+    wave_val = wave_result.score
+    
     if hf_result.available:
         hf_val = hf_result.score
         mfcc_val = mfcc_result.score
         nlp_val = nlp_result.score
         
         # --- FALSE POSITIVE MITIGATION ---
-        # Neural models are notoriously sensitive to phase noise and lossy compression (like M4A/WhatsApp).
-        # MFCC captures vocal tract shapes which are highly resilient to these artifacts.
-        # If MFCC strongly thinks it is human (< 0.4 score) but HF thinks it's AI, dampen HF.
-        if hf_val > 0.5 and mfcc_val < 0.4:
-            logger.info(f"False Positive Mitigation triggered: HF={hf_val:.2f}, MFCC={mfcc_val:.2f}")
-            hf_val = max(0.1, hf_val * 0.4) # Slash the HF confidence down to trust the acoustic physical properties
+        # Only apply if ALL heuristics strongly disagree with HF
+        if hf_val > 0.5 and mfcc_val < 0.25 and wave_val < 0.35 and hf_val < 0.8:
+            logger.info(f"False Positive Mitigation: HF={hf_val:.2f}, MFCC={mfcc_val:.2f}, Wave={wave_val:.2f}")
+            hf_val = max(0.2, hf_val * 0.6)
             
         # --- FALSE NEGATIVE MITIGATION (ACOUSTIC OVERRIDE) ---
-        # Advanced TTS models (ElevenLabs, OpenAI) can perfectly mimic natural vocal tone and fool 
-        # the neural nets (scoring 0.0). However, their microscopic acoustics still fail.
-        # We override the neural net veto if multiple severe mathematical anomalies are found.
+        # Sophisticated TTS (ElevenLabs, OpenAI, Bark, VALL-E) can fool neural nets
+        # We override if acoustic anomalies are found
         feats = mfcc_result.features
-        anomaly_count = sum([
-            1 for k, v in [
-                ('snr', feats.get('snr_db', 0) > 48),              # Suspiciously sterile
-                ('mel', feats.get('mel_smoothness', 0) > 0.88),    # Unnaturally smooth
-                ('mfcc', feats.get('mfcc_regularity', 0) > 0.80),  # Metronomic consistency
-                ('cpp', feats.get('cpp_db', 0) > 14.0)             # AI Vocoder spike
-            ] if v
-        ])
         
-        if hf_val < 0.3 and anomaly_count >= 2:
-            logger.warning(f"Acoustic Override triggered! Neural nets fooled (HF={hf_val:.2f}) but {anomaly_count} physical synthetic anomalies found.")
-            hf_val = 0.80 # Force the neural score into high-suspicion territory to veto its 0.0 vote
+        # Count severe AI indicators
+        severe_anomalies = []
+        if feats.get('snr_db', 0) > 45:
+            severe_anomalies.append('snr_too_clean')
+        if feats.get('mel_smoothness', 0) > 0.90:
+            severe_anomalies.append('mel_too_smooth')
+        if feats.get('mfcc_regularity', 0) > 0.75:
+            severe_anomalies.append('mfcc_regular')
+        if feats.get('cpp_db', 0) > 12.0:
+            severe_anomalies.append('cpp_high')
+        if feats.get('phase_coherence', 0) < 1.2:
+            severe_anomalies.append('phase_coherent')
+        if feats.get('jitter_cv', 0) < 0.2:
+            severe_anomalies.append('low_jitter')
+            
+        anomaly_count = len(severe_anomalies)
+        
+        # Aggressive override: if 2+ severe anomalies, boost the score
+        if anomaly_count >= 2:
+            boost_amount = min(0.6, anomaly_count * 0.15)
+            hf_val = max(hf_val, min(0.95, hf_val + boost_amount))
+            logger.warning(f"Acoustic Override: {anomaly_count} anomalies ({', '.join(severe_anomalies)}), HF {hf_val:.2f} -> {min(0.95, hf_val + boost_amount):.2f}")
             
         overall_score = (
             (hf_val * HF_WEIGHT) +
             (mfcc_val * MFCC_WEIGHT) +
-            (nlp_val * NLP_WEIGHT)
+            (nlp_val * NLP_WEIGHT) +
+            (wave_val * WAVE_WEIGHT)
         )
         
-        # Confidence is heavily driven by the neural model's confidence
-        # adjusted by how much the acoustic heuristics agree
+        # Confidence based on model agreement
         agreement_penalty = 0.0
-        if abs(hf_result.score - mfcc_result.score) > 0.5:
-            agreement_penalty += 0.1
+        score_std = np.std([hf_result.score, mfcc_result.score, wave_val])
+        if score_std > 0.4:
+            agreement_penalty += 0.15
             
-        overall_confidence = max(0.0, (hf_result.confidence * 0.8) + (mfcc_result.confidence * 0.2) - agreement_penalty)
+        overall_confidence = max(0.0, (hf_result.confidence * 0.7) + (mfcc_result.confidence * 0.2) + (wave_result.confidence * 0.1) - agreement_penalty)
     else:
-        # Fallback
-        overall_score = (mfcc_result.score * 0.6) + (nlp_result.score * 0.4)
-        overall_confidence = (mfcc_result.confidence * 0.6) + (nlp_result.confidence * 0.4)
+        overall_score = (mfcc_result.score * 0.5) + (wave_val * 0.3) + (nlp_result.score * 0.2)
+        overall_confidence = (mfcc_result.confidence * 0.5) + (wave_result.confidence * 0.3) + (nlp_result.confidence * 0.2)
         
     overall_score = round(float(np.clip(overall_score, 0, 1)), 4)
     overall_confidence_percent = round(float(np.clip(overall_confidence * 100, 0, 100)), 1)
@@ -214,14 +248,47 @@ async def predict(audio_path: str) -> PredictionResult:
         nlp_confidence=nlp_result.confidence,
         nlp_details=nlp_result.details,
         nlp_features=nlp_result.features,
+        
+        wave_score=wave_result.score,
+        wave_confidence=wave_result.confidence,
+        wave_details=wave_result.details,
+        wave_features=wave_result.features,
     )
+    
+    def convert_to_native(obj):
+        """Recursively convert numpy types to Python native types for JSON serialization."""
+        if hasattr(obj, 'item'):
+            val = obj.item()
+            if isinstance(val, float) and (np.isnan(val) or np.isinf(val)):
+                return 0.0
+            return val
+        elif hasattr(obj, 'tolist'):
+            return convert_to_native(obj.tolist())
+        elif isinstance(obj, dict):
+            return {k: convert_to_native(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [convert_to_native(i) for i in obj]
+        elif isinstance(obj, float):
+            if np.isnan(obj) or np.isinf(obj):
+                return 0.0
+            return obj
+        elif isinstance(obj, np.floating):
+            val = float(obj)
+            if np.isnan(val) or np.isinf(val):
+                return 0.0
+            return val
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        return obj
+    
+    result_dict = convert_to_native(result.to_dict())
     
     # Debug dump for diagnosing false positives
     try:
         import json, os
         debug_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "debug.json")
         with open(debug_path, "w") as f:
-            json.dump(result.to_dict(), f, indent=2)
+            json.dump(result_dict, f, indent=2)
     except Exception as e:
         logger.error(f"Failed to write debug dump: {e}")
 

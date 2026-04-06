@@ -5,14 +5,23 @@ function ResultsPage({ result, file, onReset }) {
     const waveformRef = useRef(null)
     const wavesurferRef = useRef(null)
 
-    const data = result?.result
-    if (!data) return null
+    const data = result?.result || result
+    const isFake = data?.is_deepfake ?? false
+    const overallScore = data?.overall_score ?? 0
+    const confidence = data?.confidence ?? 0
+    const verdict = data?.verdict ?? ''
+    const riskLevel = data?.risk_level?.toLowerCase() || 'low'
 
-    const isFake = data.is_deepfake
-    const overallScore = data.overall_score
-    const confidence = data.confidence
-    const verdict = data.verdict
-    const riskLevel = data.risk_level?.toLowerCase() || 'low'
+    if (!result) {
+        return (
+            <div className="error-container">
+                <div className="error-icon">⚠️</div>
+                <h2 className="error-title">No Results</h2>
+                <p className="error-message">Analysis completed but no data was returned.</p>
+                <button className="btn-secondary" onClick={onReset}>← Try Again</button>
+            </div>
+        )
+    }
 
     const circumference = 2 * Math.PI * 62
     const dashOffset = circumference - (overallScore * circumference)
